@@ -1011,7 +1011,6 @@ void main()
         public class UITextBox : UIElement
         {
             public string Text = "";
-
             private int _tex = -1;
             private int _texW;
             private int _texH;
@@ -1068,8 +1067,7 @@ void main()
             }
 
             public override void OnKeyDown(VectUserInterfaceLib ui, KeyboardKeyEventArgs e)
-            {
-            }
+            { }
 
             public void InsertText(string s)
             {
@@ -1180,7 +1178,6 @@ void main()
         private string _lastText = "";
         private float _lastFontSize = -1f;
         private float _padding = 10f;
-
         public string Anchor = "tr";
 
         public Notification(string text, float fontSize, float duration, string anchor)
@@ -1197,8 +1194,7 @@ void main()
         {
             Elapsed += dt;
             if (Elapsed >= Duration)
-            {
-            }
+            { }
         }
 
         public float Alpha => Math.Max(0f, 1f - (Elapsed / Math.Max(0.0001f, Duration)));
