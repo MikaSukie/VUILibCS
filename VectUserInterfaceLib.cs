@@ -9,7 +9,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 
-namespace Vectimate
+namespace DontCrashOut
 {
     public static class DSTheme
     {
@@ -257,76 +257,6 @@ void main()
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
-
-        public void ShowNotification(string text, string anchor = "tr", float fontSize = 14f, float duration = 3f)
-        {
-            anchor = (anchor ?? "tr").ToLowerInvariant();
-            if (anchor != "tl" && anchor != "tr" && anchor != "bl" && anchor != "br") anchor = "tr";
-
-            var n = new Notification(text, fontSize, duration, anchor);
-            AddElement(n);
-            LayoutNotifications();
-        }
-
-        private void LayoutNotifications()
-        {
-            float margin = 10f;
-            float spacing = 8f;
-
-            var all = _elements.OfType<Notification>().Where(x => x.Visible).ToList();
-
-            var tl = all.Where(n => n.Anchor == "tl").ToList();
-            float y = margin;
-            foreach (var n in tl)
-            {
-                n.DrawBackground(this);
-                n.Position = new Vector2(margin, y);
-                y += n.Size.Y + spacing;
-            }
-
-            var tr = all.Where(n => n.Anchor == "tr").ToList();
-            y = margin;
-            foreach (var n in tr)
-            {
-                n.DrawBackground(this);
-                n.Position = new Vector2(_windowWidth - margin - n.Size.X, y);
-                y += n.Size.Y + spacing;
-            }
-
-            var bl = all.Where(n => n.Anchor == "bl").ToList();
-            y = margin;
-            foreach (var n in bl)
-            {
-                n.DrawBackground(this);
-                n.Position = new Vector2(margin, _windowHeight - margin - n.Size.Y - y);
-                y += n.Size.Y + spacing;
-            }
-
-            var br = all.Where(n => n.Anchor == "br").ToList();
-            y = margin;
-            foreach (var n in br)
-            {
-                n.DrawBackground(this);
-                n.Position = new Vector2(_windowWidth - margin - n.Size.X, _windowHeight - margin - n.Size.Y - y);
-                y += n.Size.Y + spacing;
-            }
-        }
-
-        public void UpdateNotifications(float dt)
-        {
-            var notifications = _elements.OfType<Notification>().ToList();
-            foreach (var n in notifications)
-            {
-                n.Update(this, dt);
-                if (n.Elapsed >= n.Duration)
-                {
-                    RemoveElement(n);
-                }
-            }
-
-            LayoutNotifications();
-        }
-
         public int OverlayTexture => _overlayTex;
 
         public void SetViewport(int windowWidth, int windowHeight, int framebufferWidth, int framebufferHeight)
@@ -364,8 +294,6 @@ void main()
                 }
 
                 ViewportChanged?.Invoke();
-
-                LayoutNotifications();
             }
         }
 
@@ -762,7 +690,6 @@ void main()
         {
             foreach (var e in _elements.Where(x => x.Visible))
                 e.Update(this, dt);
-            UpdateNotifications(dt);
             if (_modalActive)
             {
                 _modalYesButton?.Update(this, dt);
@@ -1164,71 +1091,6 @@ void main()
             {
                 Children.Add(e);
             }
-        }
-    }
-    public class Notification : UIElement
-    {
-        public string Text;
-        public float FontSize;
-        public float Duration;
-        public float Elapsed = 0f;
-        private int _tex = -1;
-        private int _texW;
-        private int _texH;
-        private string _lastText = "";
-        private float _lastFontSize = -1f;
-        private float _padding = 10f;
-        public string Anchor = "tr";
-
-        public Notification(string text, float fontSize, float duration, string anchor)
-        {
-            Text = text;
-            FontSize = fontSize;
-            Duration = duration;
-            Anchor = anchor;
-            Visible = true;
-            ZIndex = 900;
-        }
-
-        public override void Update(VectUserInterfaceLib ui, float dt)
-        {
-            Elapsed += dt;
-            if (Elapsed >= Duration)
-            { }
-        }
-
-        public float Alpha => Math.Max(0f, 1f - (Elapsed / Math.Max(0.0001f, Duration)));
-
-        public override void DrawBackground(VectUserInterfaceLib ui)
-        {
-            if (_lastText != Text || Math.Abs(_lastFontSize - FontSize) > 0.001f)
-            {
-                ui.CreateTextTexture(Text, FontSize, out _texW, out _texH, ref _tex);
-                _lastText = Text;
-                _lastFontSize = FontSize;
-            }
-
-            float texLogicalW = _texW / ui._scaleX;
-            float texLogicalH = _texH / ui._scaleY;
-            Size = new Vector2(texLogicalW + _padding * 2f, texLogicalH + _padding * 2f);
-
-            ui.DrawRect(Position, Size, DSTheme.UIDarker, 0.92f * Alpha);
-        }
-
-        public override void DrawText(VectUserInterfaceLib ui)
-        {
-            if (_tex <= 0) return;
-            float texLogicalW = _texW / ui._scaleX;
-            float texLogicalH = _texH / ui._scaleY;
-            var textPos = Position + new Vector2(_padding, (Size.Y - texLogicalH) / 2f);
-            ui.DrawTexture(_tex, textPos, new Vector2(texLogicalW, texLogicalH), DSTheme.UIText, Alpha);
-        }
-
-        public override void ResetTextCache()
-        {
-            _lastText = "";
-            _lastFontSize = -1f;
-            if (_tex != -1) { GL.DeleteTexture(_tex); _tex = -1; }
         }
     }
 }
