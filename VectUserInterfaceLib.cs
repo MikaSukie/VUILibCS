@@ -9,7 +9,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 
-namespace Vectimate
+namespace DontCrashOut
 {
     public static class DSTheme
     {
@@ -175,12 +175,48 @@ void main()
         public int FramebufferHeight => _framebufferHeight;
 
         public event Action? ViewportChanged;
+        public void ClearTimedTexts()
+        {
+            _timedTexts.Clear();
+        }
+        private class TimedText
+        {
+            public Vector2 Pos;
+            public string Text = "";
+            public float FontSize;
+            public Vector3 Color;
+            public float Alpha;
+            public float RemainingMs;
+            public TimedText(Vector2 pos, string text, float fontSize, Vector3 color, float alpha, float ms)
+            {
+                Pos = pos; Text = text; FontSize = fontSize; Color = color; Alpha = alpha; RemainingMs = ms;
+            }
+        }
+
+        private readonly List<TimedText> _timedTexts = new();
 
         public Vector2 CenterPosition(Vector2 size, float yOffset = 0f)
         {
             float x = (_windowWidth - size.X) * 0.5f;
             float y = (_windowHeight - size.Y) * 0.5f + yOffset;
             return new Vector2(x, y);
+        }
+        public void DrawText(Vector2 posLogical, string text, float fontSize = 16f, Vector3? color = null, float alpha = 1f)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var col = color ?? Vector3.One;
+            int texW, texH;
+            int tex = GetOrCreateCachedTextTexture(text, fontSize, out texW, out texH);
+            if (tex <= 0) return;
+            float texLogicalW = texW / _scaleX;
+            float texLogicalH = texH / _scaleY;
+            DrawTexture(tex, posLogical, new Vector2(texLogicalW, texLogicalH), col, alpha);
+        }
+        public void DrawTextFor(Vector2 posLogical, string text, int milliseconds, float fontSize = 16f, Vector3? color = null, float alpha = 1f)
+        {
+            if (string.IsNullOrEmpty(text) || milliseconds <= 0) return;
+            var col = color ?? Vector3.One;
+            _timedTexts.Add(new TimedText(posLogical, text, fontSize, col, alpha, milliseconds));
         }
 
         private bool _prevLeftDown = false;
@@ -631,7 +667,7 @@ void main()
         public void Render(int windowWidth, int windowHeight)
         {
             GL.Enable(EnableCap.Blend);
-            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            GL.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
             GL.Disable(EnableCap.DepthTest);
 
             GL.Disable(EnableCap.CullFace);
@@ -682,6 +718,23 @@ void main()
                 _modalNoButton?.DrawText(this);
             }
 
+            if (_timedTexts.Count > 0)
+            {
+                foreach (var t in _timedTexts)
+                {
+                    int texW, texH;
+                    int tex = GetOrCreateCachedTextTexture(t.Text, t.FontSize, out texW, out texH);
+
+                    if (tex > 0)
+                    {
+                        float texLogicalW = texW / _scaleX;
+                        float texLogicalH = texH / _scaleY;
+
+                        DrawTexture(tex, t.Pos, new Vector2(texLogicalW, texLogicalH), t.Color, t.Alpha);
+                    }
+                }
+            }
+
             GL.Enable(EnableCap.DepthTest);
             GL.Disable(EnableCap.Blend);
         }
@@ -694,6 +747,18 @@ void main()
             {
                 _modalYesButton?.Update(this, dt);
                 _modalNoButton?.Update(this, dt);
+            }
+
+            if (_timedTexts.Count > 0)
+            {
+                float deltaMs = dt * 1000f;
+                for (int i = _timedTexts.Count - 1; i >= 0; i--)
+                {
+                    var t = _timedTexts[i];
+                    t.RemainingMs -= deltaMs;
+                    if (t.RemainingMs <= 0f)
+                        _timedTexts.RemoveAt(i);
+                }
             }
         }
 
