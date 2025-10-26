@@ -9,7 +9,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 
-namespace Vectimate
+namespace DontCrashOut
 {
     public static class DSTheme
     {
@@ -258,12 +258,29 @@ void main()
             GL.BindTexture(TextureTarget.Texture2D, 0);
         }
 
-        public void ShowNotification(string text, string anchor = "tr", float fontSize = 14f, float duration = 3f)
+        public enum DurationUnit
+        {
+            Seconds,
+            Milliseconds
+        }
+
+        public void ShowNotification(string text, string anchor = "tr", float fontSize = 14f, float duration = 3f, DurationUnit unit = DurationUnit.Seconds)
         {
             anchor = (anchor ?? "tr").ToLowerInvariant();
             if (anchor != "tl" && anchor != "tr" && anchor != "bl" && anchor != "br") anchor = "tr";
 
-            var n = new Notification(text, fontSize, duration, anchor);
+            float seconds;
+            if (unit == DurationUnit.Milliseconds)
+            {
+                float ms = Math.Max(1f, duration);
+                seconds = ms / 1000f;
+            }
+            else
+            {
+                seconds = Math.Max(0.001f, duration);
+            }
+
+            var n = new Notification(text, fontSize, seconds, anchor);
             AddElement(n);
             LayoutNotifications();
         }
@@ -1184,7 +1201,7 @@ void main()
         {
             Text = text;
             FontSize = fontSize;
-            Duration = duration;
+            Duration = Math.Max(0.001f, duration);
             Anchor = anchor;
             Visible = true;
             ZIndex = 900;
