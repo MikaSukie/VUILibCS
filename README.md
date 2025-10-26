@@ -29,7 +29,7 @@ This library is **self-contained** — no external GUI frameworks required.
 ```csharp
 using OpenTK.Windowing.Desktop;
 using OpenTK.Mathematics;
-using DontCrashOut;
+using Vectimate;
 
 public static class Program
 {
