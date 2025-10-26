@@ -9,7 +9,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 
-namespace DontCrashOut
+namespace Vectimate
 {
     public static class DSTheme
     {
