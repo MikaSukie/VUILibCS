@@ -8,7 +8,8 @@ Provides immediate usability with buttons, sliders, textboxes, checkboxes, notif
 ---
 
 ## 🧩 Overview
-
+dotnet add package opentk  <br>
+dotnet add package skiasharp  <br>
 `VectUserInterfaceLib` is a modular, OpenGL-friendly UI toolkit designed to give you a quick, no-dependency interface layer for your apps or tools.  
 It handles:
 - Input forwarding (mouse, keyboard, text)
