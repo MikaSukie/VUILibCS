@@ -1,31 +1,14 @@
-# ⚠️ Documentation currently written by AI — will be rewritten by MikaSukie
-
 # VUILibCS
 **Vectimate UserInterface Lib (Simple scaffolding UI library for C#)**  
 Lightweight retained-mode GUI framework built for OpenTK / SkiaSharp–based rendering.  
 Provides immediate usability with buttons, sliders, textboxes, checkboxes, notifications, modals, and scrollable containers.
 
 ---
-
-## 🧩 Overview
+## 🧩 Quick Start
 dotnet add package opentk  <br>
 dotnet add package skiasharp  <br>
-`VectUserInterfaceLib` is a modular, OpenGL-friendly UI toolkit designed to give you a quick, no-dependency interface layer for your apps or tools.  
-It handles:
-- Input forwarding (mouse, keyboard, text)
-- Simple layout/positioning
-- Interactive elements (buttons, sliders, etc.)
-- Notifications and modals
-- Text caching for performance
-- Theming through a shared `DSTheme`
 
-This library is **self-contained** — no external GUI frameworks required.
-
----
-
-## 🚀 Quick Start
-
-**Example entry point (Program.cs):**
+**Example (Program.cs):**
 
 ```csharp
 using System;
@@ -218,3 +201,4 @@ namespace Vectimate
         }
     }
 }
+```
