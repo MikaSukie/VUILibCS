@@ -4,7 +4,7 @@ Lightweight retained-mode GUI framework built for OpenTK / SkiaSharp–based ren
 Provides immediate usability with buttons, sliders, textboxes, checkboxes, notifications, modals, and scrollable containers.
 
 ---
-## 🧩 Quick Start
+## 🧩 Quick Start (including custom cursor. NOT REQUIRED)
 dotnet add package opentk  <br>
 dotnet add package skiasharp  <br>
 
