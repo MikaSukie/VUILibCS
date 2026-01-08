@@ -3,16 +3,21 @@ using OpenTK.Mathematics;
 using SkiaSharp;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 
 namespace Vectimate
 {
     public static class DSTheme
     {
-        public static readonly Vector3 UIBase = new Vector3(0.2f, 0.2f, 0.25f);
-        public static readonly Vector3 UILighter = new Vector3(0.4f, 0.4f, 0.45f);
-        public static readonly Vector3 UIDarker = new Vector3(0.15f, 0.15f, 0.2f);
-        public static readonly Vector3 UIHighlight = new Vector3(0.7f, 0.7f, 0.7f);
+        public static readonly Vector3 UIBase = new Vector3(0.20f, 0.22f, 0.26f);
+        public static readonly Vector3 UILighter = new Vector3(0.36f, 0.38f, 0.42f);
+        public static readonly Vector3 UIDarker = new Vector3(0.12f, 0.12f, 0.16f);
+        public static readonly Vector3 UIHighlight = new Vector3(0.78f, 0.78f, 0.8f);
         public static readonly Vector3 UIText = new Vector3(1.0f, 1.0f, 1.0f);
+        public static readonly Vector3 UIBorder = new Vector3(0.08f, 0.08f, 0.09f);
     }
 
     public class DSShader : IDisposable
@@ -73,7 +78,6 @@ layout (location = 1) in vec2 aTexCoord;
 
 uniform mat4 uProjection;
 uniform vec3 uColor;
-uniform int uUseTexture;
 
 out vec3 fragColor;
 out vec2 vTex;
@@ -85,7 +89,8 @@ void main()
     gl_Position = uProjection * vec4(aPos, 0.0, 1.0);
 }";
 
-    public const string Fragment = @"#version 330 core
+        public const string Fragment = @"
+#version 330 core
 
 in vec3 fragColor;
 in vec2 vTex;
@@ -96,17 +101,43 @@ uniform sampler2D uTexture;
 uniform int uUseTexture;
 uniform float uAlpha;
 
+uniform vec2 uSize;
+uniform float uRadius;
+uniform int uRounded;
+
 void main()
 {
-    if (uUseTexture == 1)
+    if (uRounded == 1)
     {
-        vec4 tex = texture(uTexture, vTex);
-        FragColor = tex * vec4(fragColor, uAlpha);
+        vec2 p = vTex * uSize;
+
+        float r = uRadius;
+        vec2 tl = vec2(r, r);
+        vec2 tr = vec2(uSize.x - r, r);
+        vec2 bl = vec2(r, uSize.y - r);
+        vec2 br = vec2(uSize.x - r, uSize.y - r);
+
+        float dist = 0.0;
+
+        if (p.x < r && p.y < r)
+            dist = distance(p, tl);
+        else if (p.x > uSize.x - r && p.y < r)
+            dist = distance(p, tr);
+        else if (p.x < r && p.y > uSize.y - r)
+            dist = distance(p, bl);
+        else if (p.x > uSize.x - r && p.y > uSize.y - r)
+            dist = distance(p, br);
+
+        if (dist > r)
+            discard;
     }
-    else
-    {
-        FragColor = vec4(fragColor, uAlpha);
-    }
+
+    vec4 base =
+        (uUseTexture == 1)
+        ? texture(uTexture, vTex)
+        : vec4(1.0);
+
+    FragColor = base * vec4(fragColor, uAlpha);
 }";
     }
 
@@ -119,6 +150,8 @@ void main()
         public bool IsFocused;
         public bool Visible = true;
         public int TabIndex = -1;
+        public Vector2 HitPadding = Vector2.Zero;
+        public bool InputTransparent = false;
         public virtual void ResetTextCache() { }
         public virtual void DrawBackground(VectUserInterfaceLib ui) { }
         public virtual void DrawText(VectUserInterfaceLib ui) { }
@@ -128,17 +161,19 @@ void main()
         public virtual void OnRightClick(VectUserInterfaceLib ui, Vector2 localPos) { }
         public virtual void OnKeyDown(VectUserInterfaceLib ui, KeyboardKeyEventArgs e) { }
         public virtual void Dispose() { }
+
         public Vector2 ToLocal(Vector2 fbPoint, VectUserInterfaceLib ui)
         {
             Vector2 posFb = ui.ToFramebuffer(Position);
             return new Vector2(fbPoint.X - posFb.X, fbPoint.Y - posFb.Y);
         }
 
-        public bool HitTest(Vector2 fbPoint, VectUserInterfaceLib ui)
+        public virtual bool HitTest(Vector2 fbPoint, VectUserInterfaceLib ui)
         {
             Vector2 posFb = ui.ToFramebuffer(Position);
-            Vector2 sizeFb = ui.ToFramebufferSize(Size);
-            return fbPoint.X >= posFb.X && fbPoint.X <= posFb.X + sizeFb.X && fbPoint.Y >= posFb.Y && fbPoint.Y <= posFb.Y + sizeFb.Y;
+            Vector2 sizeFb = ui.ToFramebufferSize(Size + HitPadding * 2f);
+            Vector2 paddedPos = posFb - ui.ToFramebuffer(HitPadding);
+            return fbPoint.X >= paddedPos.X && fbPoint.X <= paddedPos.X + sizeFb.X && fbPoint.Y >= paddedPos.Y && fbPoint.Y <= paddedPos.Y + sizeFb.Y;
         }
     }
 
@@ -152,6 +187,7 @@ void main()
         private readonly DSShader _shader;
         private int _overlayTex = -1;
         private int _whiteTex = -1;
+        private int _cornerTex = -1;
         private readonly List<UIElement> _elements = new();
         public IEnumerable<UIButton> Buttons => _elements.OfType<UIButton>();
         public IEnumerable<UISlider> Sliders => _elements.OfType<UISlider>();
@@ -266,6 +302,10 @@ void main()
             _overlayTex = GL.GenTexture();
             GL.BindTexture(TextureTarget.Texture2D, _overlayTex);
 
+            byte[] overlayPx = new byte[] { 0, 0, 0, 128 };
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, 1, 1, 0,
+                OpenTK.Graphics.OpenGL4.PixelFormat.Rgba, PixelType.UnsignedByte, overlayPx);
+
             _whiteTex = GL.GenTexture();
             GL.BindTexture(TextureTarget.Texture2D, _whiteTex);
             byte[] whitePx = new byte[] { 255, 255, 255, 255 };
@@ -278,16 +318,9 @@ void main()
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
             GL.BindTexture(TextureTarget.Texture2D, 0);
 
-            byte[] px = new byte[] { 0, 0, 0, 128 };
-            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, 1, 1, 0,
-                OpenTK.Graphics.OpenGL4.PixelFormat.Rgba, PixelType.UnsignedByte, px);
-
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
-            GL.BindTexture(TextureTarget.Texture2D, 0);
+            _cornerTex = CreateCircleTexture(64);
         }
+
         public int OverlayTexture => _overlayTex;
 
         public void SetViewport(int windowWidth, int windowHeight, int framebufferWidth, int framebufferHeight)
@@ -426,6 +459,37 @@ void main()
             return tex;
         }
 
+        private int CreateCircleTexture(int size)
+        {
+            if (size <= 0) size = 64;
+            var info = new SKImageInfo(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info);
+            var canvas = surface.Canvas;
+            canvas.Clear(SKColors.Transparent);
+
+            using var paint = new SKPaint { IsAntialias = true, Color = SKColors.White };
+            float r = size / 2f;
+            canvas.DrawCircle(r, r, r, paint);
+            canvas.Flush();
+
+            using var image = surface.Snapshot();
+            using var pix = image.PeekPixels();
+            var span = pix.GetPixelSpan();
+            byte[] pixels = span.ToArray();
+
+            int tex = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, tex);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, pix.Width, pix.Height, 0,
+                OpenTK.Graphics.OpenGL4.PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            return tex;
+        }
+
         public void AddElement(UIElement e)
         {
             _elements.Add(e);
@@ -439,6 +503,7 @@ void main()
         public void AddButton(UIButton b) => AddElement(b);
         public void AddTextBox(UITextBox tb) => AddElement(tb);
         public void AddSlider(UISlider s) => AddElement(s);
+
         public void ProcessMouse(Vector2 mousePosLogical, bool leftClick, bool rightClick)
         {
             Vector2 mouse = new Vector2(mousePosLogical.X * _scaleX, mousePosLogical.Y * _scaleY);
@@ -460,16 +525,20 @@ void main()
 
             foreach (var e in ordered)
             {
+                if (e.InputTransparent) { e.IsHovered = false; continue; }
+
                 Vector2 posFb = ToFramebuffer(e.Position);
-                Vector2 sizeFb = ToFramebufferSize(e.Size);
-                bool hovered = PointInRect(mouse, posFb, sizeFb);
+                Vector2 sizeFb = ToFramebufferSize(e.Size + e.HitPadding * 2f);
+                Vector2 paddedPosFb = posFb - ToFramebuffer(e.HitPadding);
+                bool hovered = PointInRect(mouse, paddedPosFb, sizeFb);
                 e.IsHovered = hovered;
 
                 if (hovered && leftPressedThisFrame)
                 {
                     foreach (var other in _elements.OfType<UITextBox>()) other.IsFocused = false;
 
-                    e.OnMouseDown(this, e.ToLocal(mouse, this), MouseButton.Left);
+                    Vector2 localFb = new Vector2(mouse.X - paddedPosFb.X, mouse.Y - paddedPosFb.Y);
+                    e.OnMouseDown(this, localFb, MouseButton.Left);
 
                     if (e is UITextBox) anyTextBoxClicked = true;
 
@@ -478,7 +547,8 @@ void main()
 
                 if (hovered && rightClick)
                 {
-                    e.OnRightClick(this, e.ToLocal(mouse, this));
+                    Vector2 localFb = new Vector2(mouse.X - paddedPosFb.X, mouse.Y - paddedPosFb.Y);
+                    e.OnRightClick(this, localFb);
                     break;
                 }
             }
@@ -662,7 +732,7 @@ void main()
         public void Render(int windowWidth, int windowHeight)
         {
             GL.Enable(EnableCap.Blend);
-            GL.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             GL.Disable(EnableCap.DepthTest);
 
             GL.Disable(EnableCap.CullFace);
@@ -696,7 +766,7 @@ void main()
                 float cx = (_windowWidth - dialogW) * 0.5f;
                 float cy = (_windowHeight - dialogH) * 0.5f;
 
-                DrawRect(new Vector2(cx, cy), new Vector2(dialogW, dialogH), DSTheme.UILighter);
+                DrawRoundedRect(new Vector2(cx, cy), new Vector2(dialogW, dialogH), DSTheme.UILighter, 8f);
 
                 if (_modalTextTex > 0)
                 {
@@ -789,6 +859,111 @@ void main()
             GL.BindVertexArray(0);
         }
 
+        public void DrawRoundedRect(
+            Vector2 posLogical,
+            Vector2 sizeLogical,
+            Vector3 fillColor,
+            float radiusLogical,
+            float fillAlpha,
+            float borderWidth,
+            Vector3 borderColor,
+            float borderAlpha = 1f)
+        {
+            DrawRoundedRectSimple(
+                posLogical,
+                sizeLogical,
+                borderColor,
+                radiusLogical,
+                borderAlpha
+            );
+
+            var innerPos = posLogical + new Vector2(borderWidth, borderWidth);
+            var innerSize = sizeLogical - new Vector2(borderWidth * 2f, borderWidth * 2f);
+
+            if (innerSize.X > 0 && innerSize.Y > 0)
+            {
+                DrawRoundedRectSimple(
+                    innerPos,
+                    innerSize,
+                    fillColor,
+                    MathF.Max(0f, radiusLogical - borderWidth),
+                    fillAlpha
+                );
+            }
+        }
+
+
+        public void DrawRoundedRect(
+            Vector2 posLogical,
+            Vector2 sizeLogical,
+            Vector3 color,
+            float radiusLogical,
+            float alpha = 1f)
+        {
+            Vector2 pos = ToFramebuffer(posLogical);
+            Vector2 size = ToFramebufferSize(sizeLogical);
+            float radius = radiusLogical * _scaleAvg;
+
+            _shader.Use();
+
+            GL.Uniform3(GL.GetUniformLocation(_shader.Handle, "uColor"), color);
+            GL.Uniform1(GL.GetUniformLocation(_shader.Handle, "uAlpha"), alpha);
+            GL.Uniform1(GL.GetUniformLocation(_shader.Handle, "uUseTexture"), 0);
+
+            GL.Uniform1(GL.GetUniformLocation(_shader.Handle, "uRounded"), 1);
+            GL.Uniform2(GL.GetUniformLocation(_shader.Handle, "uSize"), size);
+            GL.Uniform1(GL.GetUniformLocation(_shader.Handle, "uRadius"), radius);
+
+            float[] vertices =
+            {
+                pos.X, pos.Y, 0f, 0f,
+                pos.X + size.X, pos.Y, 1f, 0f,
+                pos.X + size.X, pos.Y + size.Y, 1f, 1f,
+                pos.X, pos.Y + size.Y, 0f, 1f
+            };
+
+            GL.BindVertexArray(_texVao);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _texVbo);
+            GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero, vertices.Length * sizeof(float), vertices);
+
+            GL.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, 0);
+
+            GL.BindVertexArray(0);
+
+            GL.Uniform1(GL.GetUniformLocation(_shader.Handle, "uRounded"), 0);
+        }
+
+        private void DrawRoundedRectBorder(Vector2 posLogical, Vector2 sizeLogical, float radiusLogical, float borderWidth, Vector3 color, float alpha)
+        {
+            DrawRoundedRectSimple(posLogical, sizeLogical, color, radiusLogical, alpha);
+            var innerPos = posLogical + new Vector2(borderWidth, borderWidth);
+            var innerSize = sizeLogical - new Vector2(borderWidth * 2f, borderWidth * 2f);
+            var innerColor = DSTheme.UIDarker;
+            DrawRoundedRectSimple(innerPos, innerSize, innerColor, MathF.Max(0f, radiusLogical - borderWidth), alpha);
+        }
+
+        private void DrawRoundedRectSimple(Vector2 posLogical, Vector2 sizeLogical, Vector3 color, float radiusLogical, float alpha)
+        {
+            float r = MathF.Max(0f, MathF.Min(radiusLogical, MathF.Min(sizeLogical.X, sizeLogical.Y) / 2f));
+            var centerPos = posLogical + new Vector2(r, 0f);
+            var centerSize = new Vector2(sizeLogical.X - 2f * r, sizeLogical.Y);
+            if (centerSize.X > 0 && centerSize.Y > 0) DrawRect(centerPos, centerSize, color, alpha);
+            var leftStripPos = posLogical + new Vector2(0f, r);
+            var leftStripSize = new Vector2(r, sizeLogical.Y - 2f * r);
+            if (leftStripSize.X > 0 && leftStripSize.Y > 0) DrawRect(leftStripPos, leftStripSize, color, alpha);
+            var rightStripPos = posLogical + new Vector2(sizeLogical.X - r, r);
+            var rightStripSize = new Vector2(r, sizeLogical.Y - 2f * r);
+            if (rightStripSize.X > 0 && rightStripSize.Y > 0) DrawRect(rightStripPos, rightStripSize, color, alpha);
+            if (_cornerTex > 0 && r > 0f)
+            {
+                float cornerSz = r * 2f;
+                DrawTexture(_cornerTex, posLogical + new Vector2(0f, 0f), new Vector2(cornerSz, cornerSz), color, alpha);
+                DrawTexture(_cornerTex, posLogical + new Vector2(sizeLogical.X - cornerSz, 0f), new Vector2(cornerSz, cornerSz), color, alpha);
+                DrawTexture(_cornerTex, posLogical + new Vector2(sizeLogical.X - cornerSz, sizeLogical.Y - cornerSz), new Vector2(cornerSz, cornerSz), color, alpha);
+                DrawTexture(_cornerTex, posLogical + new Vector2(0f, sizeLogical.Y - cornerSz), new Vector2(cornerSz, cornerSz), color, alpha);
+            }
+        }
+
         public void DrawTexture(int texture, Vector2 posLogical, Vector2 sizeLogical, Vector3? color = null, float alpha = 1f)
         {
             if (texture <= 0) return;
@@ -856,7 +1031,23 @@ void main()
                 _whiteTex = -1;
             }
 
+            if (_cornerTex != -1)
+            {
+                GL.DeleteTexture(_cornerTex);
+                _cornerTex = -1;
+            }
+
             _shader.Dispose();
+        }
+
+        public float MeasureTextWidth(string text, float fontSizeLogical)
+        {
+            if (string.IsNullOrEmpty(text)) return 0f;
+            float pixFontSize = Math.Max(1f, fontSizeLogical * _scaleAvg);
+            using var typeface = SKTypeface.FromFamilyName("Noto Sans");
+            using var font = new SKFont(typeface, pixFontSize) { Edging = SKFontEdging.Antialias };
+            float px = font.MeasureText(text);
+            return px / _scaleX;
         }
 
         public class UIButton : UIElement
@@ -872,17 +1063,25 @@ void main()
             private string _lastText = "";
             private float _lastFontSize = -1f;
 
+            public float CornerRadius = 6f;
+            public Vector2 Padding = new Vector2(8f, 6f);
+
             public UIButton(Vector2 pos, Vector2 size, string text, float fontSize = 16f)
             {
                 Position = pos;
                 Size = size;
                 Text = text;
                 FontSize = fontSize;
+                HitPadding = new Vector2(4f, 4f);
+                TabIndex = -1;
             }
 
             public override void DrawBackground(VectUserInterfaceLib ui)
             {
-                ui.DrawRect(Position, Size, IsHovered ? DSTheme.UIHighlight : DSTheme.UIBase);
+                var col = IsHovered ? DSTheme.UILighter : DSTheme.UIBase;
+                if (IsFocused && IsHovered) col = DSTheme.UIDarker;
+
+                ui.DrawRoundedRect(Position, Size, col, CornerRadius, 1f, 1f, DSTheme.UIBorder);
             }
 
             public override void DrawText(VectUserInterfaceLib ui)
@@ -901,10 +1100,12 @@ void main()
                 float texLogicalW = _texW / (ui._scaleX);
                 float texLogicalH = _texH / (ui._scaleY);
 
-                float x = Position.X + (Size.X - texLogicalW) / 2f;
+                float maxW = Math.Max(0f, Size.X - Padding.X * 2f);
+                float drawW = Math.Min(maxW, texLogicalW);
+                float x = Position.X + (Size.X - drawW) / 2f;
                 float y = Position.Y + (Size.Y - texLogicalH) / 2f;
 
-                ui.DrawTexture(_tex, new Vector2(x, y), new Vector2(texLogicalW, texLogicalH));
+                ui.DrawTexture(_tex, new Vector2(x, y), new Vector2(drawW, texLogicalH));
             }
 
             public override void OnMouseDown(VectUserInterfaceLib ui, Vector2 localPos, MouseButton button)
@@ -949,8 +1150,8 @@ void main()
 
             public override void DrawBackground(VectUserInterfaceLib ui)
             {
-                ui.DrawRect(Position, Size, DSTheme.UIBase);
-                ui.DrawRect(Position, new Vector2(Size.X * Value, Size.Y), DSTheme.UIHighlight);
+                ui.DrawRoundedRect(Position, Size, DSTheme.UIBase, MathF.Min(Size.Y / 2f, 6f));
+                ui.DrawRoundedRect(Position, new Vector2(Size.X * Value, Size.Y), DSTheme.UIHighlight, MathF.Min(Size.Y / 2f, 6f));
             }
 
             public override void OnMouseDown(VectUserInterfaceLib ui, Vector2 localPos, MouseButton button)
@@ -1002,7 +1203,18 @@ void main()
             private int _texW;
             private int _texH;
             private string _lastText = "";
-
+            public int CaretIndex = 0;
+            public int SelectionStart = 0;
+            public int SelectionEnd = 0;
+            private int _selectionAnchor = 0;
+            private bool _isDragging = false;
+            private int _lastClickTime = 0;
+            private float _caretTimer = 0f;
+            private bool _caretVisible = true;
+            private float _caretBlinkInterval = 0.5f;
+            private float _scrollX = 0f;
+            public float LeftPadding = 6f;
+            public float FontSize = 16f;
             public UITextBox(Vector2 pos, Vector2 size)
             {
                 Position = pos;
@@ -1011,12 +1223,13 @@ void main()
                 IsFocused = false;
                 IsHovered = false;
                 TabIndex = -1;
+                HitPadding = new Vector2(2f, 2f);
             }
 
             public override void DrawBackground(VectUserInterfaceLib ui)
             {
                 var bg = IsFocused ? DSTheme.UILighter : DSTheme.UIBase;
-                ui.DrawRect(Position, Size, bg);
+                ui.DrawRoundedRect(Position, Size, bg, 6f, 1f, 1f, DSTheme.UIBorder);
             }
 
             public override void ResetTextCache()
@@ -1025,16 +1238,32 @@ void main()
                 if (_tex != -1) { GL.DeleteTexture(_tex); _tex = -1; }
             }
 
+            private int GetSelectionStartNormalized()
+            {
+                return Math.Min(SelectionStart, SelectionEnd);
+            }
+
+            private int GetSelectionEndNormalized()
+            {
+                return Math.Max(SelectionStart, SelectionEnd);
+            }
+
+            private int SelectionLength()
+            {
+                return GetSelectionEndNormalized() - GetSelectionStartNormalized();
+            }
+
             public override void DrawText(VectUserInterfaceLib ui)
             {
                 if (Text == null) Text = "";
 
-                string display = IsFocused ? Text + "|" : Text;
+                string visibleText = Text;
+                int totalChars = visibleText.Length;
 
-                if (_lastText != display)
+                if (_lastText != visibleText + "|" + CaretIndex + "|" + SelectionStart + "|" + SelectionEnd)
                 {
-                    ui.CreateTextTexture(display, 16f, out _texW, out _texH, ref _tex);
-                    _lastText = display;
+                    ui.CreateTextTexture(visibleText, FontSize, out _texW, out _texH, ref _tex);
+                    _lastText = visibleText + "|" + CaretIndex + "|" + SelectionStart + "|" + SelectionEnd;
                 }
 
                 if (_tex <= 0) return;
@@ -1042,32 +1271,387 @@ void main()
                 float texLogicalW = _texW / (ui._scaleX);
                 float texLogicalH = _texH / (ui._scaleY);
 
-                float x = Position.X + 6f;
+                float x = Position.X + LeftPadding;
                 float y = Position.Y + (Size.Y - texLogicalH) / 2f;
-                ui.DrawTexture(_tex, new Vector2(x, y), new Vector2(texLogicalW, texLogicalH));
+
+                float innerWidth = Math.Max(0f, Size.X - LeftPadding * 2f);
+
+                float textWidth = ui.MeasureTextWidth(visibleText, FontSize);
+
+                _scrollX = Math.Max(0f, Math.Min(_scrollX, Math.Max(0f, textWidth - innerWidth)));
+
+                float drawX = x - _scrollX;
+
+                int selStart = GetSelectionStartNormalized();
+                int selEnd = GetSelectionEndNormalized();
+                if (selEnd > selStart)
+                {
+                    string beforeSel = visibleText.Substring(0, selStart);
+                    string selText = visibleText.Substring(selStart, selEnd - selStart);
+                    float beforeWidth = ui.MeasureTextWidth(beforeSel, FontSize);
+                    float selWidth = ui.MeasureTextWidth(selText, FontSize);
+                    Vector2 selPos = new Vector2(drawX + beforeWidth, y);
+                    Vector2 selSize = new Vector2(selWidth, texLogicalH);
+                    ui.DrawRect(selPos, selSize, DSTheme.UIHighlight, 0.3f);
+                }
+
+                int texToDraw = _tex;
+                ui.DrawTexture(texToDraw, new Vector2(drawX, y), new Vector2(texLogicalW, texLogicalH), DSTheme.UIText, 1f);
+
+                if (IsFocused)
+                {
+                    _caretTimer += 1f / 60f;
+                    if (_caretTimer >= _caretBlinkInterval)
+                    {
+                        _caretVisible = !_caretVisible;
+                        _caretTimer = 0f;
+                    }
+                }
+                else
+                {
+                    _caretVisible = false;
+                }
+
+                if (IsFocused && _caretVisible)
+                {
+                    string beforeCaret = visibleText.Substring(0, Math.Clamp(CaretIndex, 0, visibleText.Length));
+                    float caretPx = ui.MeasureTextWidth(beforeCaret, FontSize);
+                    float caretX = drawX + caretPx;
+                    Vector2 caretPos = new Vector2(caretX, y);
+                    Vector2 caretSize = new Vector2(1f, texLogicalH);
+                    ui.DrawRect(caretPos, caretSize, DSTheme.UIText, 1f);
+                }
             }
 
             public override void OnMouseDown(VectUserInterfaceLib ui, Vector2 localPos, MouseButton button)
             {
                 if (button != MouseButton.Left) return;
                 IsFocused = true;
+                int now = Environment.TickCount;
+                bool isDouble = (now - _lastClickTime) < 400;
+                _lastClickTime = now;
+                float clickX = localPos.X;
+                float clickLogicalX = clickX / ui._scaleX;
+                float x = Position.X + LeftPadding;
+                float innerWidth = Math.Max(0f, Size.X - LeftPadding * 2f);
+                float textX = clickLogicalX + _scrollX - LeftPadding;
+                int idx = GetIndexFromLocalX(ui, textX);
+                SetCaretAndSelectionFromClick(idx, isDouble);
+                _isDragging = true;
+                _selectionAnchor = CaretIndex;
+            }
+
+            public override void OnMouseUp(VectUserInterfaceLib ui, Vector2 localPos, MouseButton button)
+            {
+                if (button != MouseButton.Left) return;
+                _isDragging = false;
+            }
+
+            public override void Update(VectUserInterfaceLib ui, float dt)
+            {
+                if (_isDragging)
+                {
+                    Vector2 mouseFb = ui.LastMouseFramebuffer;
+                    Vector2 posFb = ui.ToFramebuffer(Position);
+                    float localX = (mouseFb.X - posFb.X) / ui._scaleX;
+                    float textX = localX + _scrollX - LeftPadding;
+                    int idx = GetIndexFromLocalX(ui, textX);
+                    CaretIndex = Math.Clamp(idx, 0, Text.Length);
+                    SelectionStart = _selectionAnchor;
+                    SelectionEnd = CaretIndex;
+                    EnsureCaretVisible(ui);
+                    _lastText = "";
+                }
+            }
+
+            private int GetIndexFromLocalX(VectUserInterfaceLib ui, float localX)
+            {
+                if (string.IsNullOrEmpty(Text)) return 0;
+                int n = Text.Length;
+                int best = 0;
+                float acc = 0f;
+                for (int i = 0; i <= n; i++)
+                {
+                    string s = Text.Substring(0, i);
+                    float w = ui.MeasureTextWidth(s, FontSize);
+                    if (Math.Abs(w - localX) < Math.Abs(acc - localX) || i == 0)
+                    {
+                        best = i;
+                        acc = w;
+                    }
+                }
+                for (int i = 0; i <= n; i++)
+                {
+                    string s = Text.Substring(0, i);
+                    float w = ui.MeasureTextWidth(s, FontSize);
+                    if (w >= localX)
+                    {
+                        return i;
+                    }
+                }
+                return Text.Length;
+            }
+
+            private void SetCaretAndSelectionFromClick(int idx, bool doubleClick)
+            {
+                if (doubleClick)
+                {
+                    int s = idx;
+                    if (s < 0) s = 0;
+                    if (s > Text.Length) s = Text.Length;
+                    int wstart = FindWordStart(s);
+                    int wend = FindWordEnd(s);
+                    SelectionStart = wstart;
+                    SelectionEnd = wend;
+                    CaretIndex = wend;
+                }
+                else
+                {
+                    CaretIndex = Math.Clamp(idx, 0, Text.Length);
+                    SelectionStart = CaretIndex;
+                    SelectionEnd = CaretIndex;
+                }
+                EnsureCaretVisible(null);
+                _lastText = "";
             }
 
             public override void OnKeyDown(VectUserInterfaceLib ui, KeyboardKeyEventArgs e)
-            { }
+            {
+                bool shift = (e.Modifiers & KeyModifiers.Shift) != 0;
+                bool ctrl = (e.Modifiers & KeyModifiers.Control) != 0;
+                if (ctrl && e.Key == Keys.A)
+                {
+                    SelectAll();
+                    return;
+                }
+                if (ctrl && e.Key == Keys.C)
+                {
+                    Copy();
+                    return;
+                }
+                if (ctrl && e.Key == Keys.X)
+                {
+                    Cut();
+                    return;
+                }
+                if (ctrl && e.Key == Keys.V)
+                {
+                    Paste();
+                    return;
+                }
+                if (e.Key == Keys.Left)
+                {
+                    if (ctrl)
+                    {
+                        int target = FindWordStart(CaretIndex);
+                        MoveCaretTo(target, shift);
+                    }
+                    else
+                    {
+                        MoveCaretBy(-1, shift);
+                    }
+                    return;
+                }
+                if (e.Key == Keys.Right)
+                {
+                    if (ctrl)
+                    {
+                        int target = FindWordEnd(CaretIndex);
+                        MoveCaretTo(target, shift);
+                    }
+                    else
+                    {
+                        MoveCaretBy(1, shift);
+                    }
+                    return;
+                }
+                if (e.Key == Keys.Home)
+                {
+                    MoveCaretTo(0, shift);
+                    return;
+                }
+                if (e.Key == Keys.End)
+                {
+                    MoveCaretTo(Text.Length, shift);
+                    return;
+                }
+                if (e.Key == Keys.Delete)
+                {
+                    if (HasSelection())
+                    {
+                        DeleteSelection();
+                    }
+                    else
+                    {
+                        if (CaretIndex < Text.Length)
+                        {
+                            Text = Text.Remove(CaretIndex, 1);
+                            _lastText = "";
+                        }
+                    }
+                    return;
+                }
+            }
+
+            private bool HasSelection()
+            {
+                return GetSelectionEndNormalized() > GetSelectionStartNormalized();
+            }
 
             public void InsertText(string s)
             {
                 if (string.IsNullOrEmpty(s)) return;
-                Text += s;
+                if (HasSelection())
+                {
+                    int ss = GetSelectionStartNormalized();
+                    int len = SelectionLength();
+                    Text = Text.Remove(ss, len).Insert(ss, s);
+                    CaretIndex = ss + s.Length;
+                    SelectionStart = CaretIndex;
+                    SelectionEnd = CaretIndex;
+                }
+                else
+                {
+                    Text = Text.Insert(CaretIndex, s);
+                    CaretIndex += s.Length;
+                }
+                EnsureCaretVisible(null);
                 _lastText = "";
             }
 
             public void Backspace()
             {
-                if (string.IsNullOrEmpty(Text)) return;
-                Text = Text.Substring(0, Math.Max(0, Text.Length - 1));
+                if (HasSelection())
+                {
+                    DeleteSelection();
+                    return;
+                }
+                if (CaretIndex <= 0) return;
+                Text = Text.Remove(CaretIndex - 1, 1);
+                CaretIndex = Math.Max(0, CaretIndex - 1);
+                EnsureCaretVisible(null);
                 _lastText = "";
+            }
+
+            private void DeleteSelection()
+            {
+                int ss = GetSelectionStartNormalized();
+                int len = SelectionLength();
+                if (len <= 0) return;
+                Text = Text.Remove(ss, len);
+                CaretIndex = ss;
+                SelectionStart = CaretIndex;
+                SelectionEnd = CaretIndex;
+                EnsureCaretVisible(null);
+                _lastText = "";
+            }
+
+            private void MoveCaretBy(int delta, bool shift)
+            {
+                int target = Math.Clamp(CaretIndex + delta, 0, Text.Length);
+                MoveCaretTo(target, shift);
+            }
+
+            private void MoveCaretTo(int index, bool shift)
+            {
+                index = Math.Clamp(index, 0, Text.Length);
+                if (shift)
+                {
+                    if (!HasSelection())
+                    {
+                        _selectionAnchor = CaretIndex;
+                    }
+                    CaretIndex = index;
+                    SelectionStart = _selectionAnchor;
+                    SelectionEnd = CaretIndex;
+                }
+                else
+                {
+                    CaretIndex = index;
+                    SelectionStart = CaretIndex;
+                    SelectionEnd = CaretIndex;
+                }
+                EnsureCaretVisible(null);
+                _lastText = "";
+            }
+
+            private int FindWordStart(int idx)
+            {
+                if (string.IsNullOrEmpty(Text)) return 0;
+                idx = Math.Clamp(idx, 0, Text.Length);
+                if (idx > 0 && idx == Text.Length) idx--;
+                while (idx > 0 && char.IsWhiteSpace(Text[idx - 1])) idx--;
+                while (idx > 0 && !char.IsWhiteSpace(Text[idx - 1])) idx--;
+                return idx;
+            }
+
+            private int FindWordEnd(int idx)
+            {
+                if (string.IsNullOrEmpty(Text)) return 0;
+                idx = Math.Clamp(idx, 0, Text.Length);
+                while (idx < Text.Length && char.IsWhiteSpace(Text[idx])) idx++;
+                while (idx < Text.Length && !char.IsWhiteSpace(Text[idx])) idx++;
+                return idx;
+            }
+
+            private static string _clipboard = "";
+
+            private void Copy()
+            {
+                if (!HasSelection()) return;
+                int ss = GetSelectionStartNormalized();
+                int len = SelectionLength();
+                string s = Text.Substring(ss, len);
+                _clipboard = s;
+            }
+
+            private void Cut()
+            {
+                if (!HasSelection()) return;
+                int ss = GetSelectionStartNormalized();
+                int len = SelectionLength();
+                string s = Text.Substring(ss, len);
+                _clipboard = s;
+                Text = Text.Remove(ss, len);
+                CaretIndex = ss;
+                SelectionStart = ss;
+                SelectionEnd = ss;
+                EnsureCaretVisible(null);
+                _lastText = "";
+            }
+
+            private void Paste()
+            {
+                if (string.IsNullOrEmpty(_clipboard)) return;
+                InsertText(_clipboard);
+            }
+
+            public void SelectAll()
+            {
+                SelectionStart = 0;
+                SelectionEnd = Text.Length;
+                CaretIndex = SelectionEnd;
+                _lastText = "";
+                EnsureCaretVisible(null);
+            }
+
+            private void EnsureCaretVisible(VectUserInterfaceLib? uiMaybe)
+            {
+                VectUserInterfaceLib ui = uiMaybe ?? GetUi();
+                if (ui == null) return;
+                string beforeCaret = Text.Substring(0, Math.Clamp(CaretIndex, 0, Text.Length));
+                float caretPx = ui.MeasureTextWidth(beforeCaret, FontSize);
+                float innerWidth = Math.Max(0f, Size.X - LeftPadding * 2f);
+                float minScroll = caretPx - innerWidth + 6f;
+                if (_scrollX < minScroll) _scrollX = minScroll;
+                if (_scrollX > caretPx - 6f) _scrollX = caretPx - 6f;
+                _scrollX = Math.Max(0f, _scrollX);
+                _lastText = "";
+            }
+
+            private VectUserInterfaceLib? GetUi()
+            {
+                return null;
             }
 
             public override void Dispose()
@@ -1080,22 +1664,22 @@ void main()
         {
             public bool Checked;
             public Action<bool>? OnToggle;
-            // private int _cachedCheckTex = -1;
 
             public UICheckbox(Vector2 pos, Vector2 size, bool initial = false)
             {
                 Position = pos;
                 Size = size;
                 Checked = initial;
+                HitPadding = new Vector2(2f, 2f);
             }
 
             public override void DrawBackground(VectUserInterfaceLib ui)
             {
-                ui.DrawRect(Position, Size, DSTheme.UIBase);
+                ui.DrawRoundedRect(Position, Size, DSTheme.UIBase, 4f);
                 if (Checked)
                 {
-                    var inset = new Vector2(4f, 4f);
-                    ui.DrawRect(Position + inset, Size - inset * 2f, DSTheme.UIHighlight);
+                    var inset = new Vector2(6f, 6f);
+                    ui.DrawRoundedRect(Position + inset, Size - inset * 2f, DSTheme.UIHighlight, 3f);
                 }
             }
 
@@ -1118,15 +1702,16 @@ void main()
                 Position = pos;
                 Size = size;
                 ContentSize = contentSize;
+                HitPadding = Vector2.Zero;
             }
 
             public override void DrawBackground(VectUserInterfaceLib ui)
             {
-                ui.DrawRect(Position, Size, DSTheme.UIDarker);
+                ui.DrawRoundedRect(Position, Size, DSTheme.UIDarker, 6f);
                 foreach (var c in Children)
                 {
                     var origPos = c.Position;
-                    c.Position = origPos - ScrollOffset;
+                    c.Position = origPos - ScrollOffset + Position;
                     c.DrawBackground(ui);
                     c.DrawText(ui);
                     c.Position = origPos;
@@ -1135,13 +1720,16 @@ void main()
 
             public override void OnMouseDown(VectUserInterfaceLib ui, Vector2 localPos, MouseButton button)
             {
+                Vector2 mouseFb = localPos + ui.ToFramebuffer(Position);
                 foreach (var c in Children.OrderByDescending(x => x.ZIndex))
                 {
-                    var childFbPos = ui.ToFramebuffer(c.Position - ScrollOffset + Position);
+                    var childGlobalPos = Position + (c.Position - ScrollOffset);
+                    var childFbPos = ui.ToFramebuffer(childGlobalPos);
                     var childFbSize = ui.ToFramebufferSize(c.Size);
-                    if (PointInRect(localPos + ui.ToFramebuffer(Position), childFbPos, childFbSize))
+                    if (PointInRect(mouseFb, childFbPos, childFbSize))
                     {
-                        c.OnMouseDown(ui, localPos - (c.Position - ScrollOffset), button);
+                        Vector2 childLocalFb = new Vector2(mouseFb.X - childFbPos.X, mouseFb.Y - childFbPos.Y);
+                        c.OnMouseDown(ui, childLocalFb, button);
                         break;
                     }
                 }
